@@ -1,6 +1,9 @@
-
 #[macro_use]
 extern crate log;
+
+use chrono::{Datelike, Local, TimeZone, Utc};
+
+use structopt::StructOpt;
 
 use spidev::{SpiModeFlags, Spidev, SpidevOptions};
 use std::io;
@@ -85,13 +88,9 @@ fn send_pixels(spi: &mut Spidev, pixels: &[Color]) -> io::Result<()> {
     Ok(())
 }
 
-fn hsv_to_rgb(hue: f64, saturation: f64, value: f64) -> (u8, u8, u8) {
+fn hsv_to_rgb(hue: f64, saturation: f64, value: f64) -> (f64, f64, f64) {
     if saturation < 1.0e-6 {
-        return (
-            (value * 255.0) as u8,
-            (value * 255.0) as u8,
-            (value * 255.0) as u8,
-        );
+        return (value, value, value);
     }
 
     let mut hue = hue;
@@ -112,14 +111,23 @@ fn hsv_to_rgb(hue: f64, saturation: f64, value: f64) -> (u8, u8, u8) {
         _ => (value, p, q),
     };
 
-    (
-        (color.0 * 255.0) as u8,
-        (color.1 * 255.0) as u8,
-        (color.2 * 255.0) as u8,
-    )
+    (color.0, color.1, color.2)
+}
+
+#[derive(Debug, StructOpt)]
+#[structopt(name = "blink", about = "Control for TCL p9813 LED chip.")]
+struct Opt {
+    /// Latitude used for sunrise calculations.
+    #[structopt(long = "latitude")]
+    lat: f64,
+    /// Longitude used for sunrise calculations.
+    #[structopt(long = "longitude")]
+    lon: f64,
 }
 
 fn main() {
+    let opt = Opt::from_args();
+
     let mut spi = create_spi().unwrap();
 
     const NUM_LEDS: usize = 76;
@@ -132,8 +140,31 @@ fn main() {
     });
 
     loop {
+        let now = Local::now();
+        let (sunrise, sunset) =
+            sunrise::sunrise_sunset(opt.lat, opt.lon, now.year(), now.month(), now.day());
+        let sunrise = Utc.timestamp(sunrise, 0);
+        let sunset = Utc.timestamp(sunset, 0);
+
+        let now = Utc::now();
+
+        let mut gamma: f64 = 255.0;
+
+        if now > sunrise && now < sunset {
+            // Lights don't operate during the day.
+            gamma = 0.0
+        } else if now < sunrise {
+            let delta = sunrise - now;
+            const TWO_HOURS: f64 = (60 * 60 * 2) as f64;
+            gamma = 255.0 - ((delta.num_seconds() as f64 * 255.0) / TWO_HOURS);
+        } else if now > sunset {
+            let delta = now - sunset;
+            const THREE_HOURS: f64 = (60 * 60 * 3) as f64;
+            gamma = 255.0 - ((delta.num_seconds() as f64 * 255.0) / THREE_HOURS);
+        }
+
         hue.iter_mut().for_each(|v| {
-            *v += 1.00;
+            *v += 1.20;
             if *v >= 360.0 {
                 *v = 0.0;
             }
@@ -143,7 +174,7 @@ fn main() {
             .iter()
             .map(|h| {
                 let (r, g, b) = hsv_to_rgb(*h, 1.0, 1.0);
-                gamma_table.correct_color(r, g, b)
+                gamma_table.correct_color((r * gamma) as u8, (g * gamma) as u8, (b * gamma) as u8)
             })
             .collect::<Vec<Color>>();
         pixels.insert(
@@ -169,6 +200,6 @@ fn main() {
         });
 
         send_pixels(&mut spi, &pixels).unwrap();
-        std::thread::sleep(std::time::Duration::from_millis(4));
+        std::thread::sleep(std::time::Duration::from_millis(50));
     }
 }

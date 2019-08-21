@@ -8,6 +8,8 @@ use structopt::StructOpt;
 use spidev::{SpiModeFlags, Spidev, SpidevOptions};
 use std::io;
 use std::io::prelude::*;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 fn create_spi() -> io::Result<Spidev> {
     let mut spi = Spidev::open("/dev/spidev0.0")?;
@@ -128,6 +130,12 @@ struct Opt {
 fn main() {
     let opt = Opt::from_args();
 
+    let running = Arc::new(AtomicBool::new(true));
+    let r = running.clone();
+    ctrlc::set_handler(move || {
+        r.store(false, Ordering::SeqCst);
+    }).expect("Error setting Ctrl-C handler");
+
     let mut spi = create_spi().unwrap();
 
     const NUM_LEDS: usize = 76;
@@ -139,7 +147,7 @@ fn main() {
         *v = (i as f64 * 360f64) / NUM_LEDS as f64;
     });
 
-    loop {
+    while running.load(Ordering::SeqCst) {
         let now = Local::now();
         let (sunrise, sunset) =
             sunrise::sunrise_sunset(opt.lat, opt.lon, now.year(), now.month(), now.day());

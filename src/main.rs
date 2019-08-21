@@ -116,6 +116,38 @@ fn hsv_to_rgb(hue: f64, saturation: f64, value: f64) -> (f64, f64, f64) {
     (color.0, color.1, color.2)
 }
 
+fn hue_to_pixels(hue: &[f64], gamma_table: &GammaTable, gamma: f64) -> Vec<Color> {
+    let mut pixels = hue
+        .iter()
+        .map(|h| {
+            let (r, g, b) = hsv_to_rgb(*h, 1.0, 1.0);
+            gamma_table.correct_color((r * gamma) as u8, (g * gamma) as u8, (b * gamma) as u8)
+        })
+        .collect::<Vec<Color>>();
+    pixels.insert(
+        0,
+        Color {
+            flag: 0,
+            red: 0,
+            green: 0,
+            blue: 0,
+        },
+    );
+    pixels.push(Color {
+        flag: 0,
+        red: 0,
+        green: 0,
+        blue: 0,
+    });
+    pixels.push(Color {
+        flag: 0,
+        red: 0,
+        green: 0,
+        blue: 0,
+    });
+    pixels
+}
+
 #[derive(Debug, StructOpt)]
 #[structopt(name = "blink", about = "Control for TCL p9813 LED chip.")]
 struct Opt {
@@ -134,7 +166,8 @@ fn main() {
     let r = running.clone();
     ctrlc::set_handler(move || {
         r.store(false, Ordering::SeqCst);
-    }).expect("Error setting Ctrl-C handler");
+    })
+    .expect("Error setting Ctrl-C handler");
 
     let mut spi = create_spi().unwrap();
 
@@ -178,36 +211,11 @@ fn main() {
             }
         });
 
-        let mut pixels = hue
-            .iter()
-            .map(|h| {
-                let (r, g, b) = hsv_to_rgb(*h, 1.0, 1.0);
-                gamma_table.correct_color((r * gamma) as u8, (g * gamma) as u8, (b * gamma) as u8)
-            })
-            .collect::<Vec<Color>>();
-        pixels.insert(
-            0,
-            Color {
-                flag: 0,
-                red: 0,
-                green: 0,
-                blue: 0,
-            },
-        );
-        pixels.push(Color {
-            flag: 0,
-            red: 0,
-            green: 0,
-            blue: 0,
-        });
-        pixels.push(Color {
-            flag: 0,
-            red: 0,
-            green: 0,
-            blue: 0,
-        });
-
+        let pixels = hue_to_pixels(&hue[..], &gamma_table, gamma);
         send_pixels(&mut spi, &pixels).unwrap();
         std::thread::sleep(std::time::Duration::from_millis(16));
     }
+
+    let pixels = hue_to_pixels(&hue[..], &gamma_table, 0.0);
+    send_pixels(&mut spi, &pixels).unwrap();
 }

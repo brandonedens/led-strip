@@ -13,7 +13,7 @@ fn create_spi() -> io::Result<Spidev> {
     let mut spi = Spidev::open("/dev/spidev0.0")?;
     let options = SpidevOptions::new()
         .bits_per_word(8)
-        .max_speed_hz(20_000)
+        .max_speed_hz(15_000_000)
         .mode(SpiModeFlags::SPI_MODE_0)
         .build();
     spi.configure(&options)?;
@@ -164,7 +164,7 @@ fn main() {
         }
 
         hue.iter_mut().for_each(|v| {
-            *v += 1.20;
+            *v += 0.20;
             if *v >= 360.0 {
                 *v = 0.0;
             }
@@ -200,6 +200,6 @@ fn main() {
         });
 
         send_pixels(&mut spi, &pixels).unwrap();
-        std::thread::sleep(std::time::Duration::from_millis(50));
+        std::thread::sleep(std::time::Duration::from_millis(16));
     }
 }
